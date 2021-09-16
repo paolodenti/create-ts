@@ -143,3 +143,11 @@ if [[ -n "${git_remote}" ]]; then
     git branch -M "${git_branch}"
     git push -u origin "${git_branch}"
 fi
+
+msg "\n${GREEN}project created${NOFORMAT}\n"
+read -p "open project in VSCode (y/n)? " openvscode
+case $openvscode in
+    [Yy]* )
+      code ${destination}
+      ;;
+esac
