@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+
+# typescript template repo
+base_git_repo="https://github.com/paolodenti/ts-template"
+
+# ==========================
+#         functions
+# ==========================
+
+# defines colors for text messages
+setup_colors() {
+  if [[ -t 2 ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' BLUE='\033[0;34m' PURPLE='\033[0;35m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE='' BLUE='' PURPLE='' CYAN='' YELLOW=''
+  fi
+}
+
+# emit text message
+msg() {
+  echo >&2 -e "${1-}"
+}
+
+# emit message error and exit
+die() {
+  local msg=$1
+  local code=${2-1} # default exit status 1
+  msg "${RED}${msg}${NOFORMAT}"
+  exit "$code"
+}
+
+# check script dependencies
+check_deps() {
+  [[ -x "$(command -v git)" ]] || die "cannot find 'git'"
+  [[ -x "$(command -v npm)" ]] || die "cannot find 'npm'"
+  [[ -x "$(command -v jq)" ]] || die "cannot find 'jq'"
+}
+
+# show usage and exit
+usage() {
+  cat <<EOF
+Usage: $(basename "${BASH_SOURCE[0]}") <destination folder> <project name> [https git remote repo [git main branch]]
+e.g.:
+./create-ts ~/new_folder myproject git@github.com:paolodenti/newproject.git master
+
+Create an empty Typescript project cloning ${base_git_repo}.
+package.json is assigned name <project name>
+EOF
+  exit
+}
+
+# ==========================
+#            main
+# ==========================
+
+setup_colors
+check_deps
+
+if [ $# -lt 2 ]; then
+    usage
+fi
+
+destination="${1%/}"
+projectname="${2}"
+git_remote="${3}"
+git_branch="${4:-master}"
+
+# check remote repo
+if [[ -n "${git_remote}" ]]; then
+    git ls-remote "${git_remote}" >/dev/null 2>&1
+    if [[ $? -ne 0 ]]; then
+        die "'${git_remote}' is not reachable"
+    fi
+fi
+
+# create destination folder if missing
+if [[ ! -d "${destination}" ]]; then
+    msg "\n${ORANGE}'${destination}' folder is missing${NOFORMAT}"
+    while true; do
+        msg "y) create '${destination}' folder?"
+        msg "n) no, exit"
+        read -p "choose an option: " choice
+        case $choice in
+            [Yy]* ) break;;
+            [Nn]* ) exit;;
+            * ) msg "\n${ORANGE}Please choose a valid option.${NOFORMAT}";;
+        esac
+    done
+
+    mkdir "${destination}" || die "cannot create '${destination}'"
+fi
+
+# check if dest folder is empty
+[ "$(ls -A ${destination})" ] && die "'${destination}' folder is not empty"
+
+# clone base repo
+msg "${GREEN}cloning ${base_git_repo} ...${NOFORMAT}"
+git clone ${base_git_repo} "${destination}" || die "git clone failed"
+
+rm -rf "${destination}/.git" && git init "${destination}" || die "Cannot initialize git repo"
+
+# update project definition
+msg "${GREEN}updating package.json ...${NOFORMAT}"
+tmp_package_json=$(mktemp)
+if [[ -n "${git_remote}" ]]; then
+    # prepare package.json repo
+    if [[ "${git_remote}" = git@* ]]; then
+        package_repo="${git_remote}"
+    else
+        package_repo="git+${git_remote}"
+    fi
+
+    jq ".name = \"${projectname}\"" "${destination}/package.json" | jq ".repository.url = \"${package_repo}\"" > "$tmp_package_json"
+else
+    jq ".name = \"${projectname}\"" "${destination}/package.json" | jq 'del(.repository)' > "$tmp_package_json"
+fi
+cp "$tmp_package_json" "${destination}/package.json" && rm "$tmp_package_json"
+
+# create base readme
+msg "${GREEN}creating empty README ...${NOFORMAT}"
+cat <<EOF > "${destination}/README.md"
+# Project ${projectname}
+
+TODO
+EOF
+
+# clone base repo
+cd "${destination}"
+
+# install project dependencies
+msg "${GREEN}installing package dependencies ...${NOFORMAT}"
+npm install
+
+# commit everything
+msg "${GREEN}committing initial version ...${NOFORMAT}"
+git add .
+git commit -m 'Initial import'
+
+# set remote if defined
+if [[ -n "${git_remote}" ]]; then
+    msg "${GREEN}setting git remote '${git_remote}' and pushing ...${NOFORMAT}"
+    git remote add origin "${git_remote}"
+    git branch -M "${git_branch}"
+    git push -u origin "${git_branch}"
+fi
